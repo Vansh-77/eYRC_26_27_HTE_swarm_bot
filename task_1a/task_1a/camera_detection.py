@@ -97,7 +97,7 @@ ARENA_X0, ARENA_Y0, ARENA_X1, ARENA_Y1 = 304, 24, 975, 695
 # it "a drawn feature". The floor texture is very uniform, so a modest
 # threshold separates cleanly. Raise it if noise leaks in, lower it if the pale
 # cyan funnel disappears.
-SAND_DISTANCE = 18
+SAND_DISTANCE = 24
 
 # Line-detection parameters. The funnel borders are thin outlines only a few
 # pixels wide: a large enough minimum length keeps small icon detail out, and a
@@ -148,6 +148,15 @@ def centre_of_quad(corners):
     cx, cy = 0.0, 0.0
 
     ##############  ADD YOUR CODE HERE  ##############
+    contour = corners.astype(np.float32).reshape((-1,1,2))
+    
+    moments = cv2.moments(contour)
+    
+    if abs(moments["m00"]) < 1e-6:
+        return cx, cy
+    
+    cx = moments["m10"]/moments["m00"]
+    cy = moments["m01"]/moments["m00"]
 
     ##################################################
 
@@ -246,6 +255,73 @@ def find_trapezoids(frame):
     trapezoids = []
 
     ##############  ADD YOUR CODE HERE  ##############
+
+    arena_frame = frame[ARENA_Y0:ARENA_Y1,ARENA_X0:ARENA_X1]
+
+    lab_frame = cv2.cvtColor(arena_frame , cv2.COLOR_BGR2LAB)
+
+    L_hist = cv2.calcHist([lab_frame],[0],None,[256],[0,256])
+    a_hist = cv2.calcHist([lab_frame],[1],None,[256],[0,256])
+    b_hist = cv2.calcHist([lab_frame],[2],None,[256],[0,256])
+
+    L = np.argmax(L_hist)
+    a = np.argmax(a_hist)
+    b = np.argmax(b_hist)
+
+    floor_lab = np.array([L , a , b])
+
+    difference = lab_frame.astype(np.float32) - floor_lab
+
+    distance = np.sqrt(np.sum(difference ** 2, axis=2))
+
+    scratch = (distance>SAND_DISTANCE).astype(np.uint8) * 255
+    kernel = np.ones((3,3), np.uint8)
+    scratch = cv2.morphologyEx(scratch,cv2.MORPH_CLOSE,kernel,iterations=2)
+
+    contours , hierarcy = cv2.findContours(scratch,cv2.RETR_CCOMP,cv2.CHAIN_APPROX_NONE)
+
+    for contour , h in zip(contours , hierarcy[0]):
+        area = cv2.contourArea(contour)
+        if area<MIN_TRAPEZOID_AREA:
+            continue
+        if h[3]==-1:
+            continue
+        epsilon = 0.03 * cv2.arcLength(contour,True)
+        approx = cv2.approxPolyDP(contour,epsilon,True)
+        if len(approx)!=4:
+            continue
+        if not cv2.isContourConvex(approx):
+            continue
+        corners = approx.reshape(4,2).astype(np.float32) 
+        def side_angle(p1, p2):
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            return math.degrees(math.atan2(dy, dx)) % 180
+
+        def angle_diff(a, b):
+            d = abs(a - b)
+            return min(d, 180 - d) 
+
+        angles = [
+            side_angle(corners[0], corners[1]),
+            side_angle(corners[1], corners[2]),
+            side_angle(corners[2], corners[3]),
+            side_angle(corners[3], corners[0])
+        ]
+        parallel_02 = angle_diff(angles[0], angles[2]) <= PARALLEL_TOLERANCE_DEG
+        parallel_13 = angle_diff(angles[1], angles[3]) <= PARALLEL_TOLERANCE_DEG
+        if parallel_02 == parallel_13:
+            continue
+
+        corners[:, 0] += ARENA_X0
+        corners[:, 1] += ARENA_Y0
+
+        center_x, center_y = centre_of_quad(corners)
+        trapezoids.append((center_x, center_y, corners))
+
+        cv2.polylines(binary,[corners.astype(np.int32)],True,255,3)
+    
+    
 
     ##################################################
 
@@ -358,7 +434,28 @@ def main():
                 #   src/shape_interface/srv/PixelToWorld.srv
                 # Read it -- it tells you the exact field names.
 
-                pass
+                request = PixelToWorld.Request()
+
+                request.pixel_x = np.float64(cx)
+                request.pixel_y = np.float64(cy)
+
+                future = client.call_async(request)
+
+                rclpy.spin_until_future_complete(node,future,timeout_sec=1.0)
+
+                if not future.done():
+                    print("service call timed out")
+                else:
+                    response = future.result()
+
+                    if not response.success:
+                        print(response.message)
+                    else:
+                        wx = response.world_x
+                        wy = response.world_y
+                        print(f"  pixel ({cx:7.2f}, {cy:7.2f})  ->  ",
+                              f"world ({wx:6.3f}, {wy:6.3f}) m")
+
 
                 ##################################################
 

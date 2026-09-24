@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright (c) 2026 e-Yantra, IIT Bombay. All rights reserved.
 # These simulation files and source code are the intellectual property of e-Yantra,
 # IIT Bombay, provided solely for eYRC 2026-27 (Theme: Hola The Explorer).
@@ -15,7 +16,6 @@
 *****************************************************************************************
 '''
 
-#!/usr/bin/env python3
 """
 This node subscribes to /cmd_vel (geometry_msgs/Twist: linear.x=vx,
 linear.y=vy, angular.z=w) and is supposed to publish the three wheel
@@ -88,7 +88,14 @@ def body_velocity_to_wheel_speeds(vx, vy, w):
     you have your inverse kinematics.
     """
     # ----- YOUR CODE HERE -----------------------------------------------
-    raise NotImplementedError("TODO: implement body_velocity_to_wheel_speeds")
+    M = np.array([
+        [np.cos(WHEEL_ANGLES_RAD[0]), np.sin(WHEEL_ANGLES_RAD[0]), CHASSIS_RADIUS_M],
+        [np.cos(WHEEL_ANGLES_RAD[1]), np.sin(WHEEL_ANGLES_RAD[1]), CHASSIS_RADIUS_M],
+        [np.cos(WHEEL_ANGLES_RAD[2]), np.sin(WHEEL_ANGLES_RAD[2]), CHASSIS_RADIUS_M]
+    ])
+    wheel_linear_velocities = M @ np.array([vx , vy , w])
+    wheel_speeds = wheel_linear_velocities / WHEEL_RADIUS_M
+    return wheel_speeds
     # ----------------------------------------------------------------------
 
 
